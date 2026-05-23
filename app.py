@@ -88,7 +88,7 @@ col_input, col_spacer, col_pipeline = st.columns([5, 0.5, 4])
 
 with col_input:
     st.markdown('<div class="input-card">', unsafe_allow_html=True)
-    topic = st.text_input("Research Topic", placeholder="e.g. AI updates in 2026", key="topic_input")
+    topic = st.text_input("Research Topic", placeholder="e.g. Modern Fusion Energy milestones", key="topic_input")
     run_btn = st.button("⚡   Run Research Pipeline", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -124,62 +124,65 @@ if run_btn:
 if st.session_state.running and not st.session_state.done:
     topic_val = st.session_state.get('current_topic', '')
 
-    # ── Step 1: Search Agent ──
-    if "search" not in st.session_state.results:
-        with st.spinner("🔍  Search Agent is collecting web records..."):
-            search_agent = build_search_agent()
-            sr = search_agent.invoke({"messages": f"Find recent, reliable and detailed information about: {topic_val}"})
-            
-            # Safe Fallback Check
-            if "output" in sr:
-                search_text = sr["output"]
-            elif "text" in sr:
-                search_text = sr["text"]
-            elif "messages" in sr and len(sr["messages"]) > 0:
-                search_text = getattr(sr["messages"][-1], "content", str(sr["messages"][-1]))
-            else:
-                search_text = str(sr)
+    try:
+        # ── Step 1: Search Agent ──
+        if "search" not in st.session_state.results:
+            with st.spinner("🔍  Search Agent is collecting web records..."):
+                search_agent = build_search_agent()
+                sr = search_agent.invoke({"messages": f"Find recent, reliable and detailed information about: {topic_val}"})
                 
-            st.session_state.results["search"] = search_text
-            st.rerun()
+                if isinstance(sr, dict) and "output" in sr:
+                    search_text = sr["output"]
+                elif isinstance(sr, dict) and "text" in sr:
+                    search_text = sr["text"]
+                else:
+                    search_text = str(sr)
+                    
+                st.session_state.results["search"] = search_text
+                st.rerun()
 
-    # ── Step 2: Reader Agent ──
-    if "reader" not in st.session_state.results:
-        with st.spinner("📄  Reader Agent is extracting deep resource texts..."):
-            search_ctx = st.session_state.results["search"]
-            reader_agent = build_reader_agent()
-            rr = reader_agent.invoke({"messages": f"Based on these results about '{topic_val}', scrape the best link:\n\n{search_ctx[:800]}"})
-            
-            # Safe Fallback Check
-            if "output" in rr:
-                reader_text = rr["output"]
-            elif "text" in rr:
-                reader_text = rr["text"]
-            elif "messages" in rr and len(rr["messages"]) > 0:
-                reader_text = getattr(rr["messages"][-1], "content", str(rr["messages"][-1]))
-            else:
-                reader_text = str(rr)
+        # ── Step 2: Reader Agent ──
+        if "reader" not in st.session_state.results:
+            with st.spinner("📄  Reader Agent is extracting deep resource texts..."):
+                search_ctx = st.session_state.results["search"]
+                reader_agent = build_reader_agent()
+                rr = reader_agent.invoke({"messages": f"Based on these results about '{topic_val}', scrape the best link:\n\n{search_ctx[:1000]}"})
                 
-            st.session_state.results["reader"] = reader_text
-            st.rerun()
+                if isinstance(rr, dict) and "output" in rr:
+                    reader_text = rr["output"]
+                elif isinstance(rr, dict) and "text" in rr:
+                    reader_text = rr["text"]
+                else:
+                    reader_text = str(rr)
+                    
+                st.session_state.results["reader"] = reader_text
+                st.rerun()
 
-    # ── Step 3: Writer Chain ──
-    if "writer" not in st.session_state.results:
-        with st.spinner("✍️  Writer Chain is compiling report draft..."):
-            combined = f"SEARCH:\n{st.session_state.results['search']}\n\nSCRAPED:\n{st.session_state.results['reader']}"
-            report_out = writer_chain.invoke({"topic": topic_val, "research": combined})
-            st.session_state.results["writer"] = report_out
-            st.rerun()
+        # ── Step 3: Writer Chain ──
+        if "writer" not in st.session_state.results:
+            with st.spinner("✍️  Writer Chain is compiling report draft..."):
+                combined = f"SEARCH:\n{st.session_state.results['search'][:1500]}\n\nSCRAPED:\n{st.session_state.results['reader'][:2000]}"
+                report_out = writer_chain.invoke({"topic": topic_val, "research": combined})
+                st.session_state.results["writer"] = report_out
+                st.rerun()
 
-    # ── Step 4: Critic Chain ──
-    if "critic" not in st.session_state.results:
-        with st.spinner("🧐  Critic Chain is scoring content..."):
-            critic_out = critic_chain.invoke({"report": st.session_state.results["writer"]})
-            st.session_state.results["critic"] = critic_out
+        # ── Step 4: Critic Chain ──
+        if "critic" not in st.session_state.results:
+            with st.spinner("🧐  Critic Chain is scoring content..."):
+                critic_out = critic_chain.invoke({"report": st.session_state.results["writer"]})
+                st.session_state.results["critic"] = critic_out
 
-    st.session_state.running = False
-    st.session_state.done = True
-    st.rerun()
+        st.session_state.running = False
+        st.session_state.done = True
+        st.rerun()
+
+    except Exception as e:
+        st.session_state.running = False
+        st.session_state.done = False
+        if "429" in str(e) or "rate_limit" in str(e).lower():
+            st.error("⏳ **Groq Rate Limit Guard Activated:** The request hit a brief rate window. Please wait a few moments and click run again.")
+        else:
+            st.error(f"💥 An execution issue occurred: {str(e)}")
 
 # ── Output Panel Rendering ──
 r = st.session_state.results
